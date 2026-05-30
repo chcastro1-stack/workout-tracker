@@ -201,7 +201,7 @@ body.timer-active .session-rest-badge{display:inline-block}
     <h4 id="confirm-title">¿Confirmar acción?</h4>
     <p id="confirm-msg">Esta acción no se puede deshacer.</p>
     <div class="confirm-actions">
-      <button class="btn-confirm-cancel" onclick="hideConfirm()">Cancelar</button>
+      <button class="btn-confirm-cancel" id="confirm-cancel-btn">Cancelar</button>
       <button class="btn-confirm-danger" id="confirm-ok-btn">Confirmar</button>
     </div>
   </div>
@@ -223,7 +223,7 @@ body.timer-active .session-rest-badge{display:inline-block}
   <div class="config-grid">
     <div class="field"><label for="num-ex">Ejercicios</label><input type="number" id="num-ex" value="4" min="1" max="12" step="1" oninput="updateNamesGrid()"></div>
     <div class="field"><label for="num-sets">Series por ejercicio</label><input type="number" id="num-sets" value="4" min="1" max="10" step="1"></div>
-    <div class="field"><label for="rest-time">Descanso (segundos) <span class="rest-display" id="rest-display">1:30</span></label><input type="number" id="rest-time" value="90" min="10" max="300" step="5" oninput="updateRestDisplay()"></div>
+    <div class="field"><label for="rest-time">Descanso (segundos) <span class="rest-display" id="rest-display">1:30</span></label><input type="number" id="rest-time" value="90" min="10" max="300" step="5" oninput="updateRestDisplay()" onblur="validateRestInput()"></div>
   </div>
   <div class="names-section">
     <div class="names-toggle">
@@ -376,28 +376,64 @@ function discardSession(){
     msg:'Se perderá todo el progreso guardado. Esta acción no se puede deshacer.',
     okText:'Descartar',
     onConfirm:()=>{
+      // 1. Stop any running intervals
+      if(sessionTimer.interval){clearInterval(sessionTimer.interval);sessionTimer.interval=null;}
+      stopRestTimer();
+      // 2. Release wake lock if active
+      releaseWakeLock();
+      // 3. Clear localStorage
       clearSession();
-      document.getElementById('resume-banner').style.display='none';
+      // 4. Reset internal state completely
+      state=[];activeEx=0;
+      sessionTimer.paused=false;sessionTimer.seconds=0;
+      sessionTimer.activeSeconds=0;sessionTimer.inRest=false;
+      restTimer.remaining=0;restTimer.total=0;restTimer.warnedAt10=false;
+      restDurations=[];lastMilestone=0;
+      // 5. Cancel any pending long press
+      cancelLongPress();
+      // 6. Reset pause button visual state
+      const pauseBtn=document.getElementById('pause-btn');
+      pauseBtn.textContent='⏸';
+      pauseBtn.classList.remove('paused');
+      pauseBtn.setAttribute('aria-label','Pausar sesión');
+      pauseBtn.setAttribute('title','Pausar sesión');
+      // 7. Reset session timer display
+      document.getElementById('session-timer').textContent='0:00';
+      // 8. Hide all UI elements except config
+      ['resume-banner','summary','timer-block','top-bar','ex-nav','end-session-bar'].forEach(id=>{
+        document.getElementById(id).style.display='none';
+      });
+      document.getElementById('timer-block').classList.remove('paused');
+      document.getElementById('exercises-panel').style.display='none';
+      document.getElementById('exercises-panel').innerHTML='';
+      document.body.classList.remove('timer-active','session-paused');
+      // 9. Show config panel
       document.getElementById('config-panel').style.display='block';
       updateRestDisplay();
+      announce('Sesión anterior descartada');
     }
   });
 }
 
 // ===== CONFIRM DIALOG =====
-let confirmCallback=null;
 function showConfirm({title,msg,okText,onConfirm}){
   document.getElementById('confirm-title').textContent=title||'¿Confirmar acción?';
   document.getElementById('confirm-msg').textContent=msg||'Esta acción no se puede deshacer.';
-  const btn=document.getElementById('confirm-ok-btn');
-  btn.textContent=okText||'Confirmar';
-  confirmCallback=onConfirm;
-  btn.onclick=()=>{hideConfirm();if(confirmCallback) confirmCallback();};
+  const okBtn=document.getElementById('confirm-ok-btn');
+  const cancelBtn=document.getElementById('confirm-cancel-btn');
+  okBtn.textContent=okText||'Confirmar';
+  // Replace handlers cleanly (avoid stacking previous closures)
+  okBtn.onclick=()=>{
+    document.getElementById('confirm-overlay').classList.remove('show');
+    if(typeof onConfirm==='function') onConfirm();
+  };
+  cancelBtn.onclick=()=>{
+    document.getElementById('confirm-overlay').classList.remove('show');
+  };
   document.getElementById('confirm-overlay').classList.add('show');
 }
 function hideConfirm(){
   document.getElementById('confirm-overlay').classList.remove('show');
-  confirmCallback=null;
 }
 
 // ===== WAKE LOCK =====
@@ -443,7 +479,11 @@ function updateNamesGrid(){
 function toggleNames(){
   const show=document.getElementById('use-names').checked;
   document.getElementById('names-grid').style.display=show?'grid':'none';
-  if(show) updateNamesGrid();
+  if(show){
+    // Only rebuild if grid is empty, to preserve user edits
+    const grid=document.getElementById('names-grid');
+    if(grid.children.length===0) updateNamesGrid();
+  }
 }
 function getExName(i){
   if(document.getElementById('use-names').checked){
@@ -453,9 +493,20 @@ function getExName(i){
   return `Ejercicio ${i+1}`;
 }
 function updateRestDisplay(){
-  const v=Math.max(10,parseInt(document.getElementById('rest-time').value)||90);
+  const raw=parseInt(document.getElementById('rest-time').value);
+  const v=isNaN(raw)?90:Math.max(10,Math.min(300,raw));
   const m=Math.floor(v/60),s=v%60;
   document.getElementById('rest-display').textContent=`${m}:${s.toString().padStart(2,'0')}`;
+}
+function validateRestInput(){
+  const el=document.getElementById('rest-time');
+  let v=parseInt(el.value);
+  if(isNaN(v)) v=90;
+  v=Math.max(10,Math.min(300,v));
+  // round to nearest 5
+  v=Math.round(v/5)*5;
+  el.value=v;
+  updateRestDisplay();
 }
 function toggleContrast(){
   document.body.classList.toggle('high-contrast',document.getElementById('high-contrast').checked);
@@ -472,15 +523,25 @@ function showWorkoutUI(){
 
 function startWorkout(){
   unlockAudio();
-  cfg.exCount=Math.max(1,parseInt(document.getElementById('num-ex').value)||4);
-  cfg.setsCount=Math.max(1,parseInt(document.getElementById('num-sets').value)||4);
-  cfg.restTime=Math.max(10,parseInt(document.getElementById('rest-time').value)||90);
+  // ensure resume banner is hidden if user clicked Start directly
+  document.getElementById('resume-banner').style.display='none';
+  cfg.exCount=Math.max(1,Math.min(12,parseInt(document.getElementById('num-ex').value)||4));
+  cfg.setsCount=Math.max(1,Math.min(10,parseInt(document.getElementById('num-sets').value)||4));
+  cfg.restTime=Math.max(10,Math.min(300,parseInt(document.getElementById('rest-time').value)||90));
+  // sync input values back in case they were out of range
+  document.getElementById('num-ex').value=cfg.exCount;
+  document.getElementById('num-sets').value=cfg.setsCount;
+  document.getElementById('rest-time').value=cfg.restTime;
   state=Array.from({length:cfg.exCount},(_,i)=>({name:getExName(i),target:cfg.setsCount,done:0}));
   activeEx=0;
   restDurations=[];
+  lastMilestone=0;
   sessionTimer.seconds=0;
   sessionTimer.activeSeconds=0;
   sessionTimer.inRest=false;
+  sessionTimer.paused=false;
+  restTimer.remaining=0;
+  restTimer.total=0;
   showWorkoutUI();
   updateGlobalProgress();renderNavStrip();renderExercises();
   startSessionTimer();requestWakeLock();saveSession();
@@ -529,6 +590,8 @@ function togglePause(){
   sessionTimer.paused=!sessionTimer.paused;
   const btn=document.getElementById('pause-btn');
   const timerBlock=document.getElementById('timer-block');
+  // cancel any pending long press when pausing
+  cancelLongPress();
   if(sessionTimer.paused){
     btn.textContent='▶';
     btn.classList.add('paused');
@@ -735,6 +798,7 @@ function checkAllDone(forceEnd){
   const allDone=state.every(e=>e.done>=e.target);
   if(!allDone&&!forceEnd) return false;
   stopRestTimer();clearInterval(sessionTimer.interval);
+  sessionTimer.interval=null;
   document.body.classList.remove('timer-active','session-paused');
   releaseWakeLock();clearSession();
   document.getElementById('timer-block').style.display='none';
@@ -828,16 +892,24 @@ function skipRest(){
     if(used>5) restDurations.push(used);
   }
   stopRestTimer();
+  restTimer.remaining=0;
+  restTimer.total=0;
+  restTimer.warnedAt10=false;
   document.getElementById('timer-block').style.display='none';
+  document.getElementById('timer-block').classList.remove('paused');
   document.body.classList.remove('timer-active');
   sessionTimer.inRest=false;
   saveSession();
 }
-function addTime(s){restTimer.remaining+=s;restTimer.total=Math.max(restTimer.total,restTimer.remaining);updateTimerDisplay();}
+function addTime(s){
+  restTimer.remaining+=s;
+  restTimer.total+=s;
+  restTimer.warnedAt10=false; // reset so warning fires again at 10s
+  updateTimerDisplay();
+}
 
 function changeRest(secs){
   cfg.restTime=secs;
-  // also adjust current timer if running
   if(restTimer.interval){
     restTimer.remaining=secs;
     restTimer.total=secs;
@@ -940,11 +1012,13 @@ document.addEventListener('keydown',(e)=>{
     if(e.key==='Escape') hideConfirm();
     return;
   }
-  if(['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
-  if((e.key===' '||e.key==='Enter')&&state.length&&!sessionTimer.paused){
+  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  // require active workout for shortcuts
+  if(!state.length) return;
+  if((e.key===' '||e.key==='Enter')&&!sessionTimer.paused){
     const ex=state[activeEx];
     if(ex&&ex.done<ex.target){e.preventDefault();markSet(activeEx,ex.done);}
   }
-  if((e.key==='p'||e.key==='P')&&state.length) togglePause();
+  if(e.key==='p'||e.key==='P'){e.preventDefault();togglePause();}
 });
 </script>
