@@ -13,6 +13,11 @@
 <link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<meta name="application-name" content="Workout Tracker">
+<meta name="msapplication-TileColor" content="#2ecc71">
+<meta name="msapplication-TileImage" content="./icon-192.png">
+<meta name="format-detection" content="telephone=no">
+<meta name="HandheldFriendly" content="true">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -195,12 +200,24 @@ body.timer-active .session-rest-badge{display:inline-block}
 
 /* Visually hidden but available to screen readers */
 .sr-only-live{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Samsung Internet hint */
+.browser-hint{display:none;background:var(--c-orange-bg);border:1px solid var(--c-orange-dim);border-radius:var(--r-lg);padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);color:var(--c-orange);font-size:var(--fs-sm);line-height:1.5}
+.browser-hint.show{display:block}
+.browser-hint strong{display:block;margin-bottom:4px;font-weight:700}
+.browser-hint button{background:transparent;border:none;color:var(--c-muted);font-size:11px;text-decoration:underline;cursor:pointer;margin-top:6px;padding:0}
 </style>
 </head>
 <body>
 
 <h2 class="sr-only">Workout tracker con cronómetro de descanso y seguimiento de series por ejercicio</h2>
 <div id="aria-live" class="sr-only-live" aria-live="polite" aria-atomic="true"></div>
+
+<div id="browser-hint" class="browser-hint">
+  <strong>💡 Para mejor experiencia, abre en Chrome</strong>
+  Algunos navegadores (Samsung Internet, Firefox) no permiten instalar esta app a pantalla completa. Para tener la mejor experiencia (sin barra de URL arriba), copia la URL y ábrela en Chrome.
+  <br><button onclick="dismissBrowserHint()">No mostrar de nuevo</button>
+</div>
 
 <div id="wake-toast" class="wake-toast">● Pantalla siempre activa durante el entrenamiento</div>
 
@@ -344,9 +361,14 @@ function loadSession(){
     const raw=localStorage.getItem(STORAGE_KEY);
     if(!raw) return null;
     const data=JSON.parse(raw);
+    // Strict validation: must have full structure
+    if(!data||typeof data!=='object') {clearSession();return null;}
+    if(!data.cfg||!Array.isArray(data.state)||data.state.length===0) {clearSession();return null;}
+    if(typeof data.ts!=='number') {clearSession();return null;}
+    // Expire after 6 hours
     if(Date.now()-data.ts > 6*3600*1000){clearSession();return null;}
     return data;
-  }catch(e){return null;}
+  }catch(e){clearSession();return null;}
 }
 function clearSession(){try{localStorage.removeItem(STORAGE_KEY);}catch(e){}}
 
@@ -355,6 +377,8 @@ function checkResume(){
   if(!data||!data.state.length) return;
   const done=data.state.reduce((a,e)=>a+e.done,0);
   const total=data.state.reduce((a,e)=>a+e.target,0);
+  // Don't show banner if no real progress was made
+  if(done===0){clearSession();return;}
   if(done>=total){clearSession();return;}
   const m=Math.floor(data.sessionSeconds/60),s=data.sessionSeconds%60;
   document.getElementById('resume-text').textContent=
@@ -1007,6 +1031,27 @@ function resetAll(){
 // boot
 checkResume();
 updateRestDisplay();
+detectBrowserAndHint();
+
+function detectBrowserAndHint(){
+  try{
+    if(localStorage.getItem('hint_dismissed_v1')==='1') return;
+    const ua=navigator.userAgent||'';
+    // Samsung Internet or Firefox on Android — limited PWA install support
+    const isSamsungInternet=/SamsungBrowser/i.test(ua);
+    const isFirefoxAndroid=/Firefox/i.test(ua)&&/Android/i.test(ua);
+    // Only show if not already running in standalone mode
+    const isStandalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone;
+    if((isSamsungInternet||isFirefoxAndroid)&&!isStandalone){
+      document.getElementById('browser-hint').classList.add('show');
+    }
+  }catch(e){}
+}
+
+function dismissBrowserHint(){
+  try{localStorage.setItem('hint_dismissed_v1','1');}catch(e){}
+  document.getElementById('browser-hint').classList.remove('show');
+}
 
 // Register service worker for PWA
 if('serviceWorker' in navigator){
