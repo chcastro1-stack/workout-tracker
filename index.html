@@ -1,3 +1,18 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Workout Tracker Pro</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#2ecc71">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Workout Tracker">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -181,16 +196,10 @@ body.timer-active .session-rest-badge{display:inline-block}
 /* Visually hidden but available to screen readers */
 .sr-only-live{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>
+</head>
+<body>
 
 <h2 class="sr-only">Workout tracker con cronómetro de descanso y seguimiento de series por ejercicio</h2>
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#2ecc71">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Workout Tracker">
-<link rel="apple-touch-icon" href="./icon-192.png">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <div id="aria-live" class="sr-only-live" aria-live="polite" aria-atomic="true"></div>
 
 <div id="wake-toast" class="wake-toast">● Pantalla siempre activa durante el entrenamiento</div>
@@ -1022,3 +1031,5 @@ document.addEventListener('keydown',(e)=>{
   if(e.key==='p'||e.key==='P'){e.preventDefault();togglePause();}
 });
 </script>
+</body>
+</html>
